@@ -1,0 +1,26 @@
+                            OLS Regression Results                            
+==============================================================================
+Dep. Variable:        Gold_Return_Pct   R-squared:                       0.165
+Model:                            OLS   Adj. R-squared:                  0.164
+Method:                 Least Squares   F-statistic:                     65.85
+Date:                Tue, 17 Nov 2026   Prob (F-statistic):           1.31e-27
+Time:                        13:35:46   Log-Likelihood:                -1590.6
+No. Observations:                1014   AIC:                             3187.
+Df Residuals:                    1011   BIC:                             3202.
+Df Model:                           2                                         
+Covariance Type:                  HAC                                         
+====================================================================================
+                       coef    std err          z      P>|z|      [0.025      0.975]
+------------------------------------------------------------------------------------
+const                0.0858      0.034      2.541      0.011       0.020       0.152
+DXY_Return_Pct      -1.0706      0.134     -7.977      0.000      -1.334      -0.808
+US10Y_Change_bps    -0.0188      0.008     -2.396      0.017      -0.034      -0.003
+==============================================================================
+Omnibus:                      282.766   Durbin-Watson:                   2.100
+Prob(Omnibus):                  0.000   Jarque-Bera (JB):             3177.783
+Skew:                          -0.942   Prob(JB):                         0.00
+Kurtosis:                      11.465   Cond. No.                         15.5
+==============================================================================
+
+Notes:
+[1] Standard Errors are heteroscedasticity and autocorrelation robust (HAC) using 5 lags and without small sample correction

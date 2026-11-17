@@ -1,0 +1,101 @@
+from pathlib import Path
+import pandas as pd
+
+# 1. Tentukan folder project berdasarkan lokasi script ini
+project_dir = Path(__file__).resolve().parent
+
+# 2. Tentukan file input dan output
+input_file = project_dir / "data" / "market_data.csv"
+output_file = project_dir / "data" / "market_data_formatted.csv"
+
+# 3. Pastikan file sumber tersedia
+if not input_file.exists():
+    raise FileNotFoundError(
+        f"File sumber tidak ditemukan: {input_file}"
+    )
+
+# 4. Baca CSV
+data = pd.read_csv(input_file)
+
+print("Kolom awal:", data.columns.tolist())
+print("Ukuran awal:", data.shape)
+
+# 5. Rapikan nama kolom
+data.columns = [
+    str(col).strip().replace(" ", "_")
+    for col in data.columns
+]
+
+# 6. Cari kolom tanggal
+possible_date_columns = ["Date", "Datetime", "Unnamed:_0"]
+
+date_column = next(
+    (col for col in possible_date_columns if col in data.columns),
+    None
+)
+
+# Kalau tanggal belum dikenali, periksa kolom pertama
+if date_column is None:
+    first_column = data.columns[0]
+    parsed_dates = pd.to_datetime(
+        data[first_column],
+        errors="coerce"
+    )
+
+    if parsed_dates.notna().sum() > 0:
+        date_column = first_column
+    else:
+        raise ValueError(
+            "Kolom tanggal tidak ditemukan. "
+            f"Kolom tersedia: {data.columns.tolist()}"
+        )
+
+# 7. Samakan nama kolom tanggal
+data = data.rename(columns={date_column: "Date"})
+
+# 8. Konversi tanggal
+data["Date"] = pd.to_datetime(
+    data["Date"],
+    errors="coerce"
+)
+
+data = data.dropna(subset=["Date"])
+
+# 9. Pastikan kolom harga menjadi angka
+price_columns = ["Open", "High", "Low", "Close", "Adj_Close", "Volume"]
+
+for col in price_columns:
+    if col in data.columns:
+        data[col] = pd.to_numeric(data[col], errors="coerce")
+
+# 10. Urutkan waktu dan hilangkan timestamp duplikat
+data = data.sort_values("Date")
+data = data.drop_duplicates(subset=["Date"], keep="last")
+
+# 11. Susun kolom
+preferred_columns = [
+    "Date", "Open", "High", "Low", "Close", "Adj_Close", "Volume",
+    "Price_Change", "Return", "Candle_Range", "Candle_Body"
+]
+
+ordered_columns = [
+    col for col in preferred_columns if col in data.columns
+]
+
+other_columns = [
+    col for col in data.columns if col not in ordered_columns
+]
+
+data = data[ordered_columns + other_columns]
+
+# 12. Format tanggal dan simpan
+data["Date"] = data["Date"].dt.strftime("%Y-%m-%d")
+
+data.to_csv(output_file, index=False)
+
+print("\nData berhasil dirapikan!")
+print("Ukuran akhir:", data.shape)
+print("Kolom akhir:", data.columns.tolist())
+print("File output:", output_file)
+print("\nPreview:")
+print(data.head())

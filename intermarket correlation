@@ -1,0 +1,208 @@
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import yfinance as yf 
+import matplotlib.pyplot as plt
+
+#===========================================================
+
+project_dir = Path(__file__).resolve().parent
+data_dir = project_dir / "data"
+charts_dir = project_dir / "charts"
+
+
+data_dir.mkdir(parents=True,exist_ok=True)
+charts_dir.mkdir(parents=True,exist_ok=True)
+
+#=============================================================
+start_date = "2022-10-25"
+
+tickers={
+    "Gold" : "GC=F",
+    "Crude_Oil" : "CL=F",
+    "US10Y_Yield": "^TNX",
+    "DXY": "DX-Y.NYB",
+}
+
+#=============================================================
+
+def download_close(name,ticker):
+    print(f"Downloading {name} ({ticker})...")
+    
+    raw = yf.download(
+        ticker,
+        start=start_date,
+        interval="1d",
+        auto_adjust=False,
+        progress=False,
+    )
+    
+    if raw.empty or "Close" not in raw.columns:
+        raise RuntimeError(
+            f"Data{ticker} kosong atau kolom Close tidak ada"
+        )
+        
+    close = raw["Close"]
+    
+    #===================================================================
+    
+    if isinstance(close,pd.DataFrame):
+        close = close.iloc[:,0]
+        
+    close = pd.to_numeric(close,errors="coerce")
+    close = close[~close.index.duplicated(keep="last")]
+    close.name = name
+    
+    return close
+    #=====================================================================
+series_list = []
+    
+for name, ticker in tickers.items():
+    series_list.append(download_close(name,ticker))
+     
+levels = pd.concat(series_list, axis = 1).sort_index()
+levels = levels.replace([np.inf, -np.inf], np.nan)
+levels.to_csv(data_dir/"intermarket_levels.csv",index_label ="Date")
+    
+    #=====================================================================
+changes = pd.DataFrame(index=levels.index)
+    
+for column in ["Gold", "Crude_Oil", "DXY"]:
+    changes[f"{column}_Return_Pct"] = (
+    levels[column].pct_change(fill_method=None) * 100
+        )
+    #====================================================
+    
+changes["US10Y_Change_bps"] =(
+    levels["US10Y_Yield"].diff() *100
+    )
+    
+changes = changes.replace([np.inf, -np.inf],np.nan)
+changes = changes.dropna()
+
+if len(changes) < 60:
+    raise RuntimeError(
+    "Observasi valid kurang dari 60 hari"
+    )
+
+changes.to_csv(
+    data_dir / "intermarket_daily.csv",
+    index_label ="Date"
+ )
+    
+    #======================================================
+    
+correlation = changes.corr(method="pearson")
+    
+print("\n=====INTERMARKET CORRELATION=====")
+print(correlation.round(3).to_string())
+    
+correlation.to_csv(
+        data_dir / "intermarket_correlation_matrix.csv"   
+    )
+    
+    #===================================================================
+window = 60 
+gold_return = changes["Gold_Return_Pct"]
+rolling = pd.DataFrame(index=changes.index)
+    
+rolling ["Gold_vs_Crude_Oil"] = (
+        gold_return.rolling(window).corr(changes["Crude_Oil_Return_Pct"])
+    )
+    
+rolling ["Gold_vs_US10Y"] = (
+        gold_return.rolling(window).corr(changes["US10Y_Change_bps"])
+    )
+    
+rolling ["Gold_vs_DXY"] = (
+        gold_return.rolling(window).corr(changes["DXY_Return_Pct"])
+    )
+    
+rolling.to_csv(
+        data_dir / "gold_rolling_correlation.csv",
+        index_label = "Date"
+    )
+    
+fig, ax = plt.subplots(figsize=(10,7))
+    
+image = ax.imshow(
+        correlation.values,
+        vmin=-1,
+        vmax=1,
+        cmap="coolwarm",
+    )
+    
+ax.set_xticks(range(len(correlation.columns)))
+ax.set_xticklabels(
+        correlation.columns,
+        rotation=35,
+        ha="right",
+    )
+    
+ax.set_yticks(range(len(correlation.index)))
+ax.set_yticklabels(correlation.index)
+    
+for i in range(len(correlation.index)):
+    for j in range(len(correlation.columns)):
+        value = correlation.iloc[i,j]
+            
+        ax.text(
+                j,
+                i,
+                f"{value:.2f}",
+                ha ="center",
+                va="center",                
+            )
+            
+ax.set_title("Intermarket Correlation Matrix")
+fig.colorbar(image, ax=ax, label = "Pearson Correlation")
+fig.tight_layout()
+
+fig.savefig(
+    charts_dir / "Intermarket_correlation_matrix.png",
+    dpi=150
+)
+
+plt.close(fig)
+
+fig, ax = plt.subplots(figsize=(12,6))
+
+for column in rolling.columns:
+    ax.plot(
+        rolling.index,
+        rolling[column],
+        label=column,
+    )
+ax.axhline(0, linestyle="--", linewidth=1)
+ax.set_ylim(-1,1)
+ax.set_title("Gold vs Macro Variables - Rolling Correlations")
+ax.set_xlabel("Date")
+ax.set_ylabel("Pearson Correlation")
+ax.legend()
+ax.grid(True, alpha=0.3)
+
+fig.tight_layout()
+
+fig.savefig(
+    charts_dir / "Gold_rolling_correlations.png",
+    dpi=150,
+)
+
+plt.close(fig)
+#============================================================================
+print("\n=== Latest 60-OBSERVATION CORRELATION ===")
+print(rolling.tail(1).round(3).to_string())
+
+print("\n==DATA SUMMARY ==")
+print(f"first date : {changes.index.min().date()}")
+print(f"Last date : {changes.index.max().date()}")
+print(f"Complete observations : {len(changes)}")
+print(f"Rolling window: {window} observations")
+
+print("\nFile saved:")
+print("- data/intermarket_levels.csv")
+print("- data/intermarket_daily.csv")
+print("-data/intermarket_correlation_matrix.csv")
+print("-charts/intermarket_correlation_matrix.partition.png")
+print("-charts/gold_rolling_correlation.png")

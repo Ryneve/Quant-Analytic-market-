@@ -1,0 +1,213 @@
+
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+from scipy.stats import spearmanr
+import statsmodels.api as sm
+from statsmodels.stats.outliers_influence import (
+    variance_inflation_factor,
+)
+
+
+# ==========================================================
+# 1. PROJECT CONFIGURATION
+# ==========================================================
+
+project_dir = Path(__file__).resolve().parent
+
+data_dir = project_dir / "data"
+input_file = data_dir / "intermarket_daily.csv"
+
+data_dir.mkdir(parents=True, exist_ok=True)
+
+
+# ==========================================================
+# 2. LOAD DATA
+# ==========================================================
+
+df = pd.read_csv(
+    input_file,
+    parse_dates=["Date"],
+)
+
+df = df.set_index("Date").sort_index()
+
+columns = [
+    "Gold_Return_Pct",
+    "Crude_Oil_Return_Pct",
+    "DXY_Return_Pct",
+    "US10Y_Change_bps",
+]
+
+df = df[columns].replace(
+    [np.inf, -np.inf], np.nan
+).dropna()
+
+if len(df) < 60:
+    raise ValueError(
+        f"Observasi valid hanya {len(df)}. "
+        "Diperlukan minimal 60 observasi."
+    )
+
+print("=" * 55)
+print("QUANTMARKET ANALYTICS")
+print("INTERMARKET ADVANCED ANALYSIS")
+print("=" * 55)
+
+print(f"Observations : {len(df)}")
+print(f"Start date   : {df.index.min().date()}")
+print(f"End date     : {df.index.max().date()}")
+
+
+# ==========================================================
+# 3. SPEARMAN CORRELATION
+# ==========================================================
+
+spearman_corr = df.corr(method="spearman")
+
+spearman_pvalues = pd.DataFrame(
+    index=columns,
+    columns=columns,
+    dtype=float,
+)
+
+for col1 in columns:
+    for col2 in columns:
+
+        result = spearmanr(
+            df[col1],
+            df[col2],
+        )
+
+        spearman_pvalues.loc[col1, col2] = (
+            result.pvalue
+        )
+
+
+print("\n=== SPEARMAN CORRELATION ===")
+print(spearman_corr.round(3).to_string())
+
+print("\n=== SPEARMAN P-VALUES ===")
+print(spearman_pvalues.round(6).to_string())
+
+
+spearman_corr.to_csv(
+    data_dir / "spearman_correlation.csv"
+)
+
+spearman_pvalues.to_csv(
+    data_dir / "spearman_pvalues.csv"
+)
+
+
+# ==========================================================
+# 4. MULTIPLE LINEAR REGRESSION
+# ==========================================================
+
+y = df["Gold_Return_Pct"]
+
+X = df[
+    [
+        "DXY_Return_Pct",
+        "US10Y_Change_bps",
+    ]
+]
+
+X = sm.add_constant(X)
+
+model = sm.OLS(y, X).fit(
+    cov_type="HAC",
+    cov_kwds={"maxlags": 5},
+)
+
+
+print("\n=== MULTIPLE REGRESSION ===")
+print(model.summary())
+
+
+with open(
+    data_dir / "gold_regression_summary.txt",
+    "w",
+    encoding="utf-8",
+) as file:
+
+    file.write(model.summary().as_text())
+
+
+# ==========================================================
+# 5. COEFFICIENT ANALYSIS
+# ==========================================================
+
+confidence_interval = model.conf_int()
+
+regression_results = pd.DataFrame({
+    "Coefficient": model.params,
+    "Robust_SE": model.bse,
+    "P_Value": model.pvalues,
+    "CI_Lower_95": confidence_interval[0],
+    "CI_Upper_95": confidence_interval[1],
+})
+
+print("\n=== COEFFICIENT ANALYSIS ===")
+
+print(
+    regression_results.round(6).to_string()
+)
+
+regression_results.to_csv(
+    data_dir / "gold_regression_coefficients.csv"
+)
+
+
+# ==========================================================
+# 6. VIF ANALYSIS
+# ==========================================================
+
+X_predictors = df[
+    [
+        "DXY_Return_Pct",
+        "US10Y_Change_bps",
+    ]
+]
+
+vif_results = []
+
+for i, column in enumerate(X_predictors.columns):
+
+    vif_value = variance_inflation_factor(
+        X_predictors.values,
+        i,
+    )
+
+    vif_results.append({
+        "Variable": column,
+        "VIF": vif_value,
+    })
+
+
+vif_df = pd.DataFrame(vif_results)
+
+print("\n=== VIF ANALYSIS ===")
+print(vif_df.round(4).to_string(index=False))
+
+vif_df.to_csv(
+    data_dir / "gold_regression_vif.csv",
+    index=False,
+)
+
+
+# ==========================================================
+# 7. MODEL METRICS
+# ==========================================================
+
+print("\n=== MODEL METRICS ===")
+
+print(f"R-squared          : {model.rsquared:.4f}")
+print(f"Adjusted R-squared : {model.rsquared_adj:.4f}")
+print(f"F-statistic        : {model.fvalue:.4f}")
+print(f"Model p-value      : {model.f_pvalue:.6g}")
+
+
+print("\n=== ANALYSIS COMPLETED ===")
+print("All results saved in the data folder.")

@@ -1,0 +1,156 @@
+from pathlib import Path
+import numpy as np
+import pandas as pd
+
+
+project_dir = Path(__file__).resolve().parent
+
+input_file = project_dir /"data"/"market_data_clean.csv"
+output_file = project_dir/"data"/"market_data_volatility.csv"
+
+if not input_file.exists():
+    raise FileNotFoundError(
+        f"Data tidak ditemukan:{input_file}"
+    )
+    
+data = pd.read_csv(input_file, parse_dates= ["Date"])
+
+data = data.sort_values("Date").reset_index(drop=True)
+
+required_columns = ["Date","Open","High","Low","Close"]
+
+for col in required_columns:
+    if col not in data.columns:
+        raise ValueError(
+            f"Kolom wajib tidak ditemukan: {col}"
+        )
+
+for col in ["Open","High","Low","Close"]:
+    data[col] = pd.to_numeric(
+        data[col], errors="coerce"
+    )
+    
+data = data.dropna(subset=required_columns).copy()
+
+if data.empty:
+    raise ValueError("tidak ada data OHLC yang valid")
+
+if(data["Close"] <= 0).any():
+    raise ValueError("Close harus positif untuk menghitung return")
+
+print("=" *55)
+print("QUANTITATIVE ANALYSIS - VOLATILITY CHECKER")
+print("="* 55)
+
+#==================================================================
+
+data["Daily_Return_Pct"] = (
+    data["Close"].pct_change() * 100
+)
+
+#==================================================================
+
+window = 20 
+
+data["Rolling_Std_20D_Pct"] = (
+    data["Daily_Return_Pct"].rolling(window=window,min_periods=window).std()
+)
+#==================================================================
+data["Annualized_Volatility_20D_Pct"] = (
+    data["Rolling_Std_20D_Pct"] * np.sqrt(252)
+)
+
+data["Volatility_Change_Pct"] = (
+    data["Rolling_Std_20D_Pct"].pct_change() * 100
+    
+)
+
+#===================================================================
+
+previous_close = data["Close"].shift(1)
+
+true_range_components = pd.concat(
+    [
+        data["High"] - data ["Low"],
+        (data["High"] - previous_close).abs(),
+        (data["Low"] - previous_close).abs()
+    ],
+    axis = 1
+)
+
+data["True_Range"] = true_range_components.max(axis = 1)
+
+atr_window = 14
+
+data["ATR_14"] = (
+    data["True_Range"].rolling(window=atr_window, min_periods=atr_window).mean()
+)
+
+data["ATR_14_Pct"] = (
+    data["ATR_14"] / data["Close"] * 100
+)
+
+#=============================================================================
+latest= data.iloc[-1]
+
+print("\n[1] INFORMASI DATA")
+print("Jumlah observasi:", len(data))
+print("Tanggal awal :", data["Date"].min().date())
+print("Tanggal akhir :", data["Date"].max().date())
+
+print("\n[2] VOLATILITAS TERBARU")
+print(f"close : {latest['Close']:.2f}")
+print(f"Daily Return : {latest['Daily_Return_Pct']:.4f}%")
+print(f"Rolling Std (20D)   : {latest['Rolling_Std_20D_Pct']:.4f}%")
+print(f"Annualized volatility :{latest['Annualized_Volatility_20D_Pct']:.4f}%")
+print(f"ATR(14D): {latest['ATR_14']:.4f}")
+print(f"ATR sebagai % harga :{latest['ATR_14_Pct']:.4f}%")
+
+#===============================================================================
+rolling_std = data["Rolling_Std_20D_Pct"].dropna()
+latest_std = rolling_std.iloc[-1]
+
+if pd.isna(latest_std):
+    print("\nStatus Volatilitas :Data belum cukup.")
+else:
+    historical_std = rolling_std.dropna()
+    
+    q25 = historical_std.quantile(0.25)
+    q75 = historical_std.quantile(0.75)
+    
+    if latest_std < q25:
+        status ="Relatif rendah"
+    elif latest_std > q75:
+        status = "Relatif tinggi"
+        
+    else:
+        status = "Menengah"
+        
+print("\n[3] STATUS VOLATILITAS")
+print(f"Rolling std terbaru : {latest_std:.4f}%")
+print(f"Kuartil bawah (Q25) : {q25:.4f}%")
+print(f"Kuartil atas (Q75)  : {q75:.4f}%")
+print(f"Status saat ini     : {status}")
+    
+#=======================================================
+
+data.to_csv(output_file,index=False)
+
+print("\n[4] OUTPUT")
+print("File tersimpan:", output_file.resolve())
+print("\nPreview:")
+print(
+    data[
+        [
+            "Date",
+            "Close",
+            "Daily_Return_Pct",
+            "Rolling_Std_20D_Pct",
+            "Annualized_Volatility_20D_Pct",
+            "ATR_14",
+            "ATR_14_Pct"
+        ]
+    ].tail(5).to_string(index=False)
+)
+
+print("\nVolatility Checker Selesai")

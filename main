@@ -1,0 +1,84 @@
+# ==========================================
+# QUANTMARKET ANALYTICS
+# Phase 1: Data Acquisition
+# ==========================================
+
+import yfinance as yf
+import pandas as pd
+from pathlib import Path
+
+
+#==============================================
+tickers = ["XAUUSD=X", "GC=F"]
+#==============================================
+data = pd.DataFrame()
+selected_ticker = None 
+
+for ticker in tickers:
+    print(f"Mencoba mengambil data: {ticker}")
+    
+    try:
+        downloaded_data = yf.download(
+            ticker,
+            period="4y",
+            interval="1d",
+            auto_adjust= False,
+            progress = False
+        )
+        
+        if not downloaded_data.empty:
+            data = downloaded_data
+            selected_ticker = ticker 
+            break 
+        
+        print(f"Data{ticker} kosong.")
+        
+    except Exception as error:
+        print(f"Gagal mengangmin{ticker}:{error}")
+        
+if data.empty:
+    print("data tidak berhasil diambil")
+    print("Periksa kembali sinyal, simbol, atau sumber data, lalu coba lagi")
+    
+else:
+    if isinstance(data.columns, pd.MultiIndex):
+        for level in range(data.columns.nlevels):
+            values = data.columns.get_level_values(level)
+            
+            if {"Open","High","Low", "Close"
+                }. issubset(
+                    set(values)
+                ):
+                    data.columns = values
+                    break 
+#===============================================================================
+print("\nInstrumen", selected_ticker)
+print("Jumlah Baris:", len(data))
+print("\nData Information:")
+data.info()
+
+#================================================================================
+print("\nMissing Values:")
+print(data.isnull().sum())
+#================================================================================
+data["Price_Change"] = data["Close"].diff()
+data["Return"]= data["Close"].pct_change()*100
+
+#=================================================================================
+data["Candle_Range"]= data["High"] - data["Low"]
+
+data["Candle_Body"] = (
+    data ["Close"] - data["Open"]
+).abs()
+
+print("\nStatictical Preview:")
+print(data.tail())
+#==================================================================================
+output_dir = Path("data")
+output_dir.mkdir(parents=True, exist_ok=True)
+
+output_file = output_dir /"market_data.csv"
+data.to_csv(output_file)
+
+print("\nData berhasil diproses!")
+print("File Tersimpan di:", output_file)

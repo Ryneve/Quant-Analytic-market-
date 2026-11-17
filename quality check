@@ -1,0 +1,169 @@
+import pandas as pd
+from pathlib import Path
+
+#=======================================================
+project_dir = Path(__file__).resolve().parent
+
+input_file = project_dir / "data"/"market_data_formatted.csv"
+output_file = project_dir / "data" / "market_data_clean.csv"
+
+if not input_file.exists():
+    raise FileNotFoundError(
+        f"File input tidak ditemukan:{input_file}"
+    )
+
+data = pd.read_csv(input_file)
+
+print("=" *50)
+print("Quantitative Analysis - Quality Check")
+print("=" * 50)
+
+#=================================================================
+print("\n[1] STRUKTUR DATA")
+print("Jumlah Baris:", len(data))
+print("Jumlah Kolom:", len(data.columns))
+print("Nama Kolom:", data.columns.tolist())
+
+required_columns = ["Date","Open","High","Low","Close"]
+
+missing_columns = [
+    col for col in required_columns
+    if col not in data.columns
+]
+
+if missing_columns:
+    raise ValueError(
+        f"Kolom wajib tidak tersedia: {missing_columns}"
+    )
+#========================================================================
+print("\n[2] TIPE DATA")
+
+data["Date"] = pd.to_datetime(
+    data["Date"],
+    errors = "coerce"
+)
+
+numeric_columns = [
+    "Open","High", "Low", "Adj_Close", "Volume"
+]
+
+for col in numeric_columns:
+    if col in data.columns:
+        data[col] = pd.to_numeric(
+            data[col],
+            errors = "coerce"
+        )
+        
+print(data.dtypes)
+
+#=============================================================================
+print("\n[3] MISSING VALUE")
+print(data.isna().sum())
+
+#=============================================================================
+print("\n[4] DUPLIKASI TANGGAL")
+
+duplicate_date = data["Date"].duplicated(keep=False)
+
+print("Jumlah baris dengan tanggal duplikat:", duplicate_date.sum())
+
+#==============================================================================
+print("\n[5] VALIDASI OHLC")
+
+invalid_high = (
+    data["High"] < data[["Open", "Close"]].max(axis=1)
+)
+
+invalid_low = (
+    data["Low"] > data[["Open", "Close"]]. min(axis=1)
+)
+
+invalid_range = data["High"] < data ["Low"]
+
+invalid_OHLC = invalid_high | invalid_low | invalid_range
+
+print("High tidak konsisten:", invalid_high.sum())
+print("Low tidak konsisten:", invalid_low.sum())
+print("High < low:", invalid_range.sum())
+print("Total candle invalid:", invalid_OHLC.sum())
+
+#=======================================================================================
+
+print("\n[6B] VALIDASI METRIK TURUNAN")
+
+expected_price_change = data["Close"].diff()
+expected_return = data["Close"].pct_change() * 100
+expected_range = data["High"] - data["Low"]
+expected_body = (data["Close"] - data["Open"]).abs()
+
+# Toleransi kecil untuk perbedaan floating-point
+tolerance = 1e-6
+
+price_change_mismatch = (
+    data["Price_Change"] - expected_price_change
+).abs() > tolerance
+
+return_mismatch = (
+    data["Return"] - expected_return
+).abs() > tolerance
+
+range_mismatch = (
+    data["Candle_Range"] - expected_range
+).abs() > tolerance
+
+body_mismatch = (
+    data["Candle_Body"] - expected_body
+).abs() > tolerance
+
+print("Price_Change tidak konsisten:",
+      price_change_mismatch.sum())
+
+print("Return tidak konsisten:",
+      return_mismatch.sum())
+
+print("Candle_Range tidak konsisten:",
+      range_mismatch.sum())
+
+print("Candle_Body tidak konsisten:",
+      body_mismatch.sum())
+
+
+#========================================================================
+print("\n[6] VALIDASI VOLUME")
+
+if "Volume" in data.columns:
+    negative_volume = data["Volume"] < 0
+    print("Volume Negatif:", negative_volume.sum())
+    
+else:
+    negative_volume = pd.Series(False, index=data.index)
+    print("Kolom Volume tidak tersedia")
+    
+#==========================================================================
+print("/n[7] PEMBERSIHAN DATA")
+
+valid_rows = (
+    data[required_columns].notna().all(axis=1)
+    & ~duplicate_date
+    & ~invalid_OHLC
+    & ~negative_volume
+)
+
+clean_data = data.loc[valid_rows].copy()
+
+clean_data = clean_data.sort_values("Date")
+
+clean_data["Date"] = clean_data["Date"].dt.strftime("%Y-%m-%d")
+
+print("Baris awal      : ", len(data))
+print("Baris dipertahankan:", len(clean_data))
+print("Baris dikeluarkan:", len(data) - len(clean_data))
+
+#================================================================
+clean_data.to_csv(output_file,index=False)
+
+print("\n QC SELESAI")
+print("File hasil:", output_file)
+print("\nPrevie data bersih:")
+print(clean_data.head())
+
